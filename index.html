@@ -49,25 +49,24 @@
     <div id="root"></div>
 
     <script type="text/babel">
-        const { useState, useEffect } = React;
+        const { useState, useEffect, useRef } = React;
 
-        // Lot sizes configured exactly as required
         const LOT_SIZES = {
-            'NIFTY': 65,
-            'SENSEX': 20,
-            'FINNIFTY': 120,
-            'BANKNIFTY': 30
+            'NIFTY': 25,
+            'BANKNIFTY': 15
         };
 
         const SAMPLE_SCRIPS = [
-            { symbol: 'NIFTY', strike: 25000, type: 'CE', ltp: 92.50, exchange: 'NFO' },
-            { symbol: 'NIFTY', strike: 25000, type: 'PE', ltp: 88.00, exchange: 'NFO' },
-            { symbol: 'BANKNIFTY', strike: 51200, type: 'CE', ltp: 215.40, exchange: 'NFO' },
-            { symbol: 'BANKNIFTY', strike: 51200, type: 'PE', ltp: 195.00, exchange: 'NFO' },
-            { symbol: 'SENSEX', strike: 81500, type: 'CE', ltp: 140.20, exchange: 'BFO' },
-            { symbol: 'SENSEX', strike: 81500, type: 'PE', ltp: 165.80, exchange: 'BFO' },
-            { symbol: 'FINNIFTY', strike: 23800, type: 'CE', ltp: 55.40, exchange: 'NFO' },
-            { symbol: 'FINNIFTY', strike: 23800, type: 'PE', ltp: 62.10, exchange: 'NFO' }
+            { symbol: 'NIFTY', strike: 24900, type: 'CE', ltp: 135.20 },
+            { symbol: 'NIFTY', strike: 25000, type: 'CE', ltp: 88.50 },
+            { symbol: 'NIFTY', strike: 25100, type: 'CE', ltp: 52.10 },
+            { symbol: 'NIFTY', strike: 24900, type: 'PE', ltp: 64.30 },
+            { symbol: 'NIFTY', strike: 25000, type: 'PE', ltp: 95.80 },
+            { symbol: 'NIFTY', strike: 25100, type: 'PE', ltp: 142.00 },
+            { symbol: 'BANKNIFTY', strike: 51200, type: 'CE', ltp: 245.50 },
+            { symbol: 'BANKNIFTY', strike: 51500, type: 'CE', ltp: 160.00 },
+            { symbol: 'BANKNIFTY', strike: 51200, type: 'PE', ltp: 210.00 },
+            { symbol: 'BANKNIFTY', strike: 51500, type: 'PE', ltp: 320.40 }
         ];
 
         const Icon = ({ name, size = 18, className = "", strokeWidth = 2 }) => {
@@ -86,19 +85,16 @@
             
             const [marketIndices, setMarketIndices] = useState([
                 { name: 'NIFTY 50', value: '24,960.50', change: '+52.10', isNegative: false },
-                { name: 'SENSEX', value: '81,520.30', change: '+180.40', isNegative: false },
-                { name: 'BANK NIFTY', value: '51,340.20', change: '-45.30', isNegative: true },
-                { name: 'FINNIFTY', value: '23,810.00', change: '+12.50', isNegative: false }
+                { name: 'NIFTY BANK', value: '51,340.20', change: '-45.30', isNegative: true }
             ]);
 
-            // Persisted Positions in LocalStorage
             const [positions, setPositions] = useState(() => {
                 const saved = localStorage.getItem('paper_positions');
                 if (saved) {
                     try { return JSON.parse(saved); } catch(e) {}
                 }
                 return [
-                    { id: '1', symbol: 'NIFTY', expiry: 'OCT', strike: 25000, optionType: 'CE', lots: 1, lotSize: 65, qty: 65, avgPrice: 92.50, ltp: 96.20, product: 'MIS', exchange: 'NFO' }
+                    { id: '1', symbol: 'NIFTY', expiry: 'OCT', strike: 25000, optionType: 'CE', lots: 2, lotSize: 25, qty: 50, avgPrice: 85.50, ltp: 94.20, product: 'MIS', exchange: 'NFO' }
                 ];
             });
 
@@ -109,16 +105,15 @@
                 optionType: 'CE',
                 lots: 1,
                 orderType: 'MARKET',
-                customPrice: 92.50,
-                product: 'MIS',
-                exchange: 'NFO'
+                customPrice: 88.50,
+                product: 'MIS'
             });
 
             useEffect(() => {
                 localStorage.setItem('paper_positions', JSON.stringify(positions));
             }, [positions]);
 
-            // Live Feed Simulation / NSE Call via CORS Proxy
+            // Live Tick / NSE Simulation
             const fetchNSELiveFeed = async () => {
                 setIsSyncing(true);
                 try {
@@ -130,18 +125,16 @@
                     if (nseData?.records?.data) {
                         const records = nseData.records.data;
                         setPositions(prev => prev.map(pos => {
-                            if (pos.symbol === 'NIFTY') {
-                                const match = records.find(r => r.strikePrice === Number(pos.strike));
-                                if (match) {
-                                    const opt = pos.optionType === 'CE' ? match.CE : match.PE;
-                                    if (opt?.lastPrice) return { ...pos, ltp: opt.lastPrice };
-                                }
+                            const match = records.find(r => r.strikePrice === Number(pos.strike));
+                            if (match) {
+                                const opt = pos.optionType === 'CE' ? match.CE : match.PE;
+                                if (opt?.lastPrice) return { ...pos, ltp: opt.lastPrice };
                             }
                             return pos;
                         }));
                     }
                 } catch (err) {
-                    // Micro-fluctuation fallback for realistic ticks
+                    // Smooth intraday jitter simulation if NSE CORS endpoint times out
                     setPositions(prev => prev.map(p => ({
                         ...p,
                         ltp: +(Math.max(1, p.ltp + (Math.random() * 1.6 - 0.8))).toFixed(2)
@@ -157,7 +150,7 @@
                 return () => clearInterval(timer);
             }, []);
 
-            // Total P&L Calculation
+            // Calculations
             const positionsWithPnl = positions.map(p => {
                 const pnl = (p.ltp - p.avgPrice) * p.qty;
                 return { ...p, pnl: Math.round(pnl * 100) / 100 };
@@ -165,12 +158,12 @@
 
             const totalPnl = positionsWithPnl.reduce((sum, item) => sum + item.pnl, 0);
 
-            // Execute Order
+            // Execute Virtual Order
             const handleExecuteOrder = (e) => {
                 e.preventDefault();
-                const lotSize = LOT_SIZES[orderForm.symbol] || 65;
-                const totalQty = Number(orderForm.lots) * lotSize;
-                const execPrice = Number(orderForm.customPrice);
+                const currentLotSize = LOT_SIZES[orderForm.symbol] || 25;
+                const totalCalculatedQty = Number(orderForm.lots) * currentLotSize;
+                const execPrice = orderForm.orderType === 'MARKET' ? Number(orderForm.customPrice) : Number(orderForm.customPrice);
 
                 const newPosition = {
                     id: Date.now().toString(),
@@ -179,18 +172,19 @@
                     strike: Number(orderForm.strike),
                     optionType: orderForm.optionType,
                     lots: Number(orderForm.lots),
-                    lotSize: lotSize,
-                    qty: totalQty,
+                    lotSize: currentLotSize,
+                    qty: totalCalculatedQty,
                     avgPrice: execPrice,
                     ltp: execPrice,
                     product: orderForm.product,
-                    exchange: orderForm.exchange
+                    exchange: 'NFO'
                 };
 
                 setPositions(prev => [newPosition, ...prev]);
                 setShowOrderModal(false);
             };
 
+            // Select Scrip from Search
             const handleSelectScrip = (scrip) => {
                 setOrderForm(prev => ({
                     ...prev,
@@ -198,7 +192,6 @@
                     strike: scrip.strike,
                     optionType: scrip.type,
                     customPrice: scrip.ltp,
-                    exchange: scrip.exchange,
                     lots: 1
                 }));
                 setShowSearchModal(false);
@@ -211,9 +204,6 @@
                 return fullName.includes(query) || s.symbol.includes(query) || s.strike.toString().includes(query);
             });
 
-            const currentActiveLotSize = LOT_SIZES[orderForm.symbol] || 65;
-            const currentTotalQty = orderForm.lots * currentActiveLotSize;
-
             return (
                 <div className="h-full w-full max-w-[420px] bg-white relative overflow-hidden flex flex-col shadow-2xl border border-gray-100">
                     
@@ -222,34 +212,34 @@
                         <span>09:45 AM</span>
                         <div className="flex gap-2 items-center">
                             <span className={`w-2 h-2 rounded-full ${isSyncing ? 'bg-amber-400 animate-ping' : 'bg-emerald-500'}`}></span>
-                            <span>{isSyncing ? 'Updating Feeds...' : 'Live Connected'}</span>
+                            <span>{isSyncing ? 'Syncing NSE...' : 'Live Connected'}</span>
                             <Icon name="wifi" size={13} />
                         </div>
                     </div>
 
-                    {/* Top Indices Scrolling Bar */}
-                    <header className="shrink-0 bg-white px-4 py-2 border-b border-gray-100">
+                    {/* Indices Header */}
+                    <header className="shrink-0 bg-white px-4 py-2.5 border-b border-gray-100">
                         <div className="flex items-center justify-between">
-                            <div className="flex gap-5 overflow-x-auto no-scrollbar">
+                            <div className="flex gap-6 overflow-x-auto no-scrollbar">
                                 {marketIndices.map((idx, i) => (
                                     <div key={i} className="flex flex-col shrink-0">
-                                        <span className="text-[11px] font-bold text-gray-500">{idx.name}</span>
+                                        <span className="text-[12px] font-semibold text-gray-500">{idx.name}</span>
                                         <div className="flex items-center gap-1.5">
-                                            <span className={`text-[12px] font-bold ${idx.isNegative ? 'text-trading-red' : 'text-trading-green'}`}>
+                                            <span className={`text-[13px] font-bold ${idx.isNegative ? 'text-trading-red' : 'text-trading-green'}`}>
                                                 {idx.value}
                                             </span>
-                                            <span className="text-[10px] text-gray-400">{idx.change}</span>
+                                            <span className="text-[11px] text-gray-400">{idx.change}</span>
                                         </div>
                                     </div>
                                 ))}
                             </div>
-                            <button onClick={fetchNSELiveFeed} className="p-1 hover:bg-gray-100 rounded-full text-gray-600 ml-2">
-                                <Icon name="refresh-cw" size={14} className={isSyncing ? "animate-spin" : ""} />
+                            <button onClick={fetchNSELiveFeed} className="p-1.5 hover:bg-gray-100 rounded-full text-gray-600 transition">
+                                <Icon name="refresh-cw" size={16} className={isSyncing ? "animate-spin" : ""} />
                             </button>
                         </div>
                     </header>
 
-                    {/* Scrollable Main Area */}
+                    {/* Scrollable Core */}
                     <div className="flex-1 overflow-y-auto no-scrollbar pb-24">
                         
                         {/* Tab Headers */}
@@ -283,15 +273,15 @@
                         <div className="flex items-center justify-between px-4 py-2 border-b border-gray-50">
                             <button 
                                 onClick={() => setShowSearchModal(true)} 
-                                className="flex items-center gap-2 text-xs font-semibold text-gray-600 bg-gray-100 hover:bg-gray-200 px-3 py-1.5 rounded-md transition">
+                                className="flex items-center gap-2 text-xs font-semibold text-gray-500 bg-gray-100 hover:bg-gray-200 px-3 py-1.5 rounded-md transition">
                                 <Icon name="search" size={14} className="text-trading-blue" />
-                                <span>Search Scrip (Nifty, Sensex...)</span>
+                                <span>Search Scrip (NIFTY / BANKNIFTY)</span>
                             </button>
                             
                             <button 
                                 onClick={() => setShowOrderModal(true)} 
                                 className="bg-trading-blue text-white text-[11px] font-bold px-3 py-1.5 rounded flex items-center gap-1 shadow hover:opacity-90">
-                                <Icon name="plus" size={14} /> Buy Scrip
+                                <Icon name="plus" size={14} /> Quick Order
                             </button>
                         </div>
 
@@ -300,11 +290,10 @@
                             {positionsWithPnl.map(pos => {
                                 const isPos = pos.pnl >= 0;
                                 return (
-                                    <div key={pos.id} className="py-3.5 px-4 hover:bg-gray-50/70 transition flex justify-between items-start">
+                                    <div key={pos.id} className="py-3.5 px-4 hover:bg-gray-50/70 transition-colors flex justify-between items-start">
                                         <div>
                                             <div className="flex items-center gap-1.5 mb-1 text-[11px] text-gray-400 font-medium">
-                                                <span className="font-bold text-gray-700">{pos.lots} {pos.lots > 1 ? 'Lots' : 'Lot'}</span>
-                                                <span>({pos.qty} Qty @ {pos.lotSize}/lot)</span>
+                                                <span>{pos.lots} Lots ({pos.qty} Qty)</span>
                                                 <span>•</span>
                                                 <span>Avg. ₹{pos.avgPrice.toFixed(2)}</span>
                                             </div>
@@ -340,14 +329,14 @@
 
                     {/* SEARCH SCRIP MODAL */}
                     {showSearchModal && (
-                        <div className="absolute inset-0 bg-black/60 z-50 flex items-start justify-center p-3">
+                        <div className="absolute inset-0 bg-black/60 z-50 flex items-start justify-center p-3 animate-fade-in">
                             <div className="bg-white w-full rounded-xl p-4 shadow-2xl mt-8 max-h-[80vh] flex flex-col">
                                 <div className="flex justify-between items-center pb-2 border-b">
                                     <div className="flex items-center gap-2 flex-1">
                                         <Icon name="search" size={16} className="text-gray-400" />
                                         <input 
                                             type="text" 
-                                            placeholder="Search eg: NIFTY, SENSEX, FINNIFTY..."
+                                            placeholder="Search eg: nifty 25000 ce, banknifty"
                                             value={searchQuery}
                                             onChange={e => setSearchQuery(e.target.value)}
                                             className="w-full text-xs font-semibold focus:outline-none"
@@ -366,13 +355,11 @@
                                                 <div className="text-xs font-bold text-gray-800">
                                                     {item.symbol} {item.strike} <span className={item.type === 'CE' ? 'text-emerald-600' : 'text-rose-600'}>{item.type}</span>
                                                 </div>
-                                                <div className="text-[10px] text-gray-400">
-                                                    {item.exchange} • 1 Lot = <span className="font-bold text-gray-700">{LOT_SIZES[item.symbol]} Qty</span>
-                                                </div>
+                                                <div className="text-[10px] text-gray-400">NSE • Lot: {LOT_SIZES[item.symbol]}</div>
                                             </div>
                                             <div className="text-right">
                                                 <span className="text-xs font-bold text-gray-700">₹{item.ltp.toFixed(2)}</span>
-                                                <span className="block text-[9px] text-trading-blue font-bold">SELECT &rarr;</span>
+                                                <span className="block text-[9px] text-trading-blue font-bold">TRADE &rarr;</span>
                                             </div>
                                         </div>
                                     ))}
@@ -381,57 +368,38 @@
                         </div>
                     )}
 
-                    {/* ORDER EXECUTION MODAL */}
+                    {/* ORDER EXECUTION MODAL (WITH LOTS & QUANTITY) */}
                     {showOrderModal && (
-                        <div className="absolute inset-0 bg-black/50 z-50 flex items-end">
+                        <div className="absolute inset-0 bg-black/50 z-50 flex items-end animate-fade-in">
                             <div className="bg-white w-full rounded-t-2xl p-5 shadow-2xl">
                                 <div className="flex justify-between items-center mb-3">
                                     <div>
                                         <h3 className="text-sm font-bold text-gray-900">
                                             {orderForm.symbol} {orderForm.strike} {orderForm.optionType}
                                         </h3>
-                                        <span className="text-[11px] text-trading-blue font-semibold">
-                                            Lot Size: {currentActiveLotSize} Qty/Lot
-                                        </span>
+                                        <span className="text-[10px] text-gray-400">1 Lot = {LOT_SIZES[orderForm.symbol]} Shares</span>
                                     </div>
                                     <button onClick={() => setShowOrderModal(false)}><Icon name="x" size={18} /></button>
                                 </div>
 
                                 <form onSubmit={handleExecuteOrder} className="space-y-3">
-                                    {/* Index Selector */}
-                                    <div className="grid grid-cols-2 gap-2">
-                                        <div>
-                                            <label className="text-[10px] font-bold text-gray-500">INDEX</label>
-                                            <select 
-                                                className="w-full border rounded p-1.5 text-xs font-semibold"
-                                                value={orderForm.symbol} 
-                                                onChange={e => {
-                                                    const sym = e.target.value;
-                                                    setOrderForm({
-                                                        ...orderForm, 
-                                                        symbol: sym,
-                                                        exchange: sym === 'SENSEX' ? 'BFO' : 'NFO'
-                                                    });
-                                                }}>
-                                                <option value="NIFTY">NIFTY (Lot: 65)</option>
-                                                <option value="SENSEX">SENSEX (Lot: 20)</option>
-                                                <option value="FINNIFTY">FINNIFTY (Lot: 120)</option>
-                                                <option value="BANKNIFTY">BANKNIFTY (Lot: 30)</option>
-                                            </select>
-                                        </div>
-                                        <div>
-                                            <label className="text-[10px] font-bold text-gray-500">OPTION TYPE</label>
-                                            <select 
-                                                className="w-full border rounded p-1.5 text-xs font-semibold"
-                                                value={orderForm.optionType} 
-                                                onChange={e => setOrderForm({...orderForm, optionType: e.target.value})}>
-                                                <option value="CE">Call (CE)</option>
-                                                <option value="PE">Put (PE)</option>
-                                            </select>
-                                        </div>
+                                    {/* Order Type Toggle: Market vs Limit */}
+                                    <div className="flex rounded-md bg-gray-100 p-0.5 text-xs font-bold">
+                                        <button 
+                                            type="button" 
+                                            onClick={() => setOrderForm({...orderForm, orderType: 'MARKET'})}
+                                            className={`flex-1 py-1.5 rounded ${orderForm.orderType === 'MARKET' ? 'bg-white shadow text-trading-blue' : 'text-gray-500'}`}>
+                                            Market
+                                        </button>
+                                        <button 
+                                            type="button" 
+                                            onClick={() => setOrderForm({...orderForm, orderType: 'LIMIT'})}
+                                            className={`flex-1 py-1.5 rounded ${orderForm.orderType === 'LIMIT' ? 'bg-white shadow text-trading-blue' : 'text-gray-500'}`}>
+                                            Limit
+                                        </button>
                                     </div>
 
-                                    {/* Lots & Auto Quantity */}
+                                    {/* Lots & Quantity Inputs */}
                                     <div className="grid grid-cols-2 gap-3">
                                         <div>
                                             <label className="text-[10px] font-bold text-gray-500">NUMBER OF LOTS</label>
@@ -445,40 +413,43 @@
                                             />
                                         </div>
                                         <div>
-                                            <label className="text-[10px] font-bold text-gray-500">TOTAL QUANTITY (AUTO)</label>
+                                            <label className="text-[10px] font-bold text-gray-500">TOTAL QUANTITY</label>
                                             <input 
                                                 type="text" 
                                                 readOnly
-                                                className="w-full border rounded p-1.5 text-xs font-bold bg-blue-50 text-trading-blue outline-none border border-blue-100"
-                                                value={`${currentTotalQty} Qty (${orderForm.lots} × ${currentActiveLotSize})`} 
+                                                className="w-full border rounded p-1.5 text-xs font-bold bg-gray-50 text-gray-600 outline-none"
+                                                value={`${orderForm.lots * (LOT_SIZES[orderForm.symbol] || 25)} Qty`} 
                                             />
                                         </div>
                                     </div>
 
-                                    {/* Execution Price Input */}
+                                    {/* Price Selection */}
                                     <div>
-                                        <label className="text-[10px] font-bold text-gray-500">EXECUTION PRICE (₹)</label>
+                                        <label className="text-[10px] font-bold text-gray-500">
+                                            {orderForm.orderType === 'MARKET' ? 'LTP EXECUTION PRICE' : 'LIMIT BUY PRICE'}
+                                        </label>
                                         <input 
                                             type="number" 
                                             step="0.05"
-                                            className="w-full border rounded p-1.5 text-xs font-bold outline-none focus:border-blue-500"
+                                            disabled={orderForm.orderType === 'MARKET'}
+                                            className={`w-full border rounded p-1.5 text-xs font-bold outline-none ${orderForm.orderType === 'MARKET' ? 'bg-gray-50 text-gray-600' : 'focus:border-blue-500'}`}
                                             value={orderForm.customPrice} 
                                             onChange={e => setOrderForm({...orderForm, customPrice: e.target.value})} 
                                         />
                                     </div>
 
-                                    {/* Capital Required Summary */}
-                                    <div className="flex justify-between items-center text-[11px] text-gray-500 pt-1 border-t">
-                                        <span>Virtual Capital Needed:</span>
-                                        <span className="font-bold text-gray-900">
-                                            ₹{(currentTotalQty * Number(orderForm.customPrice)).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                                    {/* Margin / Capital Required preview */}
+                                    <div className="flex justify-between items-center text-[11px] text-gray-500 pt-1">
+                                        <span>Approx Margin Required:</span>
+                                        <span className="font-bold text-gray-800">
+                                            ₹{(orderForm.lots * (LOT_SIZES[orderForm.symbol] || 25) * orderForm.customPrice).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
                                         </span>
                                     </div>
 
                                     <button 
                                         type="submit" 
                                         className="w-full py-2.5 bg-trading-blue hover:bg-blue-600 text-white rounded-md font-bold text-xs uppercase tracking-wider shadow transition">
-                                        BUY {currentTotalQty} QTY ({orderForm.lots} {orderForm.lots > 1 ? 'LOTS' : 'LOT'})
+                                        BUY {orderForm.lots * (LOT_SIZES[orderForm.symbol] || 25)} QTY ({orderForm.orderType})
                                     </button>
                                 </form>
                             </div>
@@ -489,7 +460,7 @@
                     <nav className="shrink-0 h-[65px] bg-white border-t border-gray-100 flex items-center justify-around px-2">
                         <button onClick={() => setShowSearchModal(true)} className="flex flex-col items-center gap-1 text-gray-400 hover:text-trading-blue">
                             <Icon name="search" size={18} />
-                            <span className="text-[10px] font-medium">Search</span>
+                            <span className="text-[10px] font-medium">Watchlist</span>
                         </button>
                         <button className="flex flex-col items-center gap-1 text-gray-400">
                             <Icon name="clipboard-list" size={18} />
